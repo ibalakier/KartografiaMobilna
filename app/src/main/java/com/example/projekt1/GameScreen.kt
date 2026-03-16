@@ -11,9 +11,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.geometry.LatLng
@@ -50,37 +54,55 @@ private const val DEFAULT_ZOOM_LEVEL = 4.5
 //}
 
 @Composable
+fun rememberMapView(): MapView {
+    val context = LocalContext.current
+    val mapView = remember {
+        MapView(context).apply { onCreate(null) }
+    }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val lifecycle = lifecycleOwner.lifecycle
+
+    DisposableEffect(lifecycleOwner, mapView) {
+        val observer = object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) { mapView.onStart() }
+            override fun onResume(owner: LifecycleOwner) { mapView.onResume() }
+            override fun onPause(owner: LifecycleOwner) { mapView.onPause() }
+            override fun onStop(owner: LifecycleOwner) { mapView.onStop() }
+            override fun onDestroy(owner: LifecycleOwner) { mapView.onDestroy() }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    return mapView
+}
+
+@Composable
 fun GameMap(
     modifier: Modifier = Modifier,
     initialLocation: LatLng
 ) {
     val context = LocalContext.current
-
     remember { MapLibre.getInstance(context) }
 
-    val mapView = remember { MapView(context) }
+    val mapView = rememberMapView()
 
     AndroidView(
         factory = {
-            mapView.apply {
-                onCreate(null)
-                getMapAsync { map ->
-                    map.setStyle(MAP_STYLE)
-                    map.cameraPosition = CameraPosition.Builder()
-                        .target(initialLocation)
-                        .zoom(DEFAULT_ZOOM_LEVEL)
-                        .build()
-                }
-            }
+            mapView.setUp(initialLocation)
         },
         modifier = modifier
     )
+}
 
-    DisposableEffect(Unit) {
-        onDispose {
-            mapView.onDestroy()
-        }
+fun MapView.setUp(location: LatLng): MapView {
+    this.getMapAsync { map ->
+        map.setStyle(MAP_STYLE)
+        map.cameraPosition = CameraPosition.Builder()
+            .target(location)
+            .zoom(DEFAULT_ZOOM_LEVEL)
+            .build()
     }
+    return this
 }
 
 @Composable
