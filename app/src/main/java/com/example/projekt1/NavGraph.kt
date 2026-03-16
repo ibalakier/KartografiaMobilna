@@ -24,7 +24,7 @@ fun NavGraph(viewModel: GameViewModel) {
         }
         composable("game_screen/{factionName}") { backStackEntry ->
             val factionName = backStackEntry.arguments?.getString("factionName") ?: ""
-            GameScreen(factionName)
+            GameScreen(factionName, viewModel)
         }
     }
 }
