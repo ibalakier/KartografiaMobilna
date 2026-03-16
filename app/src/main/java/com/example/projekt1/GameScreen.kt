@@ -25,33 +25,6 @@ import org.maplibre.android.maps.MapView
 
 private const val MAP_STYLE = "https://demotiles.maplibre.org/style.json"
 private const val DEFAULT_ZOOM_LEVEL = 4.5
-//
-//@Composable
-//fun GameScreen(factionName: String) {
-//    val startLocation = if (factionName == "POLANDIA") {
-//        LatLng(52.2297, 21.0122)
-//    } else {
-//        LatLng(0.0236, 37.9062)
-//    }
-//
-//    Box(modifier = Modifier.fillMaxSize()) {
-//        GameMap(
-//            modifier = Modifier.fillMaxSize(),
-//            initialLocation = startLocation
-//        )
-//
-//        Text(
-//            text = "Wybrana frakcja: $factionName",
-//            modifier = Modifier
-//                .align(Alignment.TopCenter)
-//                .statusBarsPadding()
-//                .padding(top = 8.dp),
-//            style = MaterialTheme.typography.headlineSmall,
-//            fontWeight = FontWeight.Bold,
-//            color = Color.Black
-//        )
-//    }
-//}
 
 @Composable
 fun rememberMapView(): MapView {
