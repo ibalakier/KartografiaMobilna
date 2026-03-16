@@ -1,6 +1,9 @@
 package com.example.projekt1
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -18,33 +21,33 @@ import org.maplibre.android.maps.MapView
 
 private const val MAP_STYLE = "https://demotiles.maplibre.org/style.json"
 private const val DEFAULT_ZOOM_LEVEL = 4.5
-
-@Composable
-fun GameScreen(factionName: String) {
-    val startLocation = if (factionName == "POLANDIA") {
-        LatLng(52.2297, 21.0122)
-    } else {
-        LatLng(0.0236, 37.9062)
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        GameMap(
-            modifier = Modifier.fillMaxSize(),
-            initialLocation = startLocation
-        )
-
-        Text(
-            text = "Wybrana frakcja: $factionName",
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(top = 8.dp),
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            color = Color.Black
-        )
-    }
-}
+//
+//@Composable
+//fun GameScreen(factionName: String) {
+//    val startLocation = if (factionName == "POLANDIA") {
+//        LatLng(52.2297, 21.0122)
+//    } else {
+//        LatLng(0.0236, 37.9062)
+//    }
+//
+//    Box(modifier = Modifier.fillMaxSize()) {
+//        GameMap(
+//            modifier = Modifier.fillMaxSize(),
+//            initialLocation = startLocation
+//        )
+//
+//        Text(
+//            text = "Wybrana frakcja: $factionName",
+//            modifier = Modifier
+//                .align(Alignment.TopCenter)
+//                .statusBarsPadding()
+//                .padding(top = 8.dp),
+//            style = MaterialTheme.typography.headlineSmall,
+//            fontWeight = FontWeight.Bold,
+//            color = Color.Black
+//        )
+//    }
+//}
 
 @Composable
 fun GameMap(
@@ -76,6 +79,58 @@ fun GameMap(
     DisposableEffect(Unit) {
         onDispose {
             mapView.onDestroy()
+        }
+    }
+}
+
+@Composable
+fun GameScreen(factionName: String, viewModel: GameViewModel) {
+    val startLocation = if (factionName == "POLANDIA") {
+        LatLng(52.2297, 21.0122)
+    } else {
+        LatLng(0.0236, 37.9062)
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        GameMap(
+            modifier = Modifier.fillMaxSize(),
+            initialLocation = startLocation
+        )
+        Text(
+            text = "Wybrana frakcja: $factionName",
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 8.dp),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = Color.Black
+        )
+
+        // PANEL STATYSTYK - Material Card
+        Card(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(start = 16.dp,top = 48.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "Runda: ${viewModel.roundNumber}",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                HorizontalDivider(modifier = Modifier.width(100.dp))
+                Text(text = "💰 Złoto: ${viewModel.gold}", style = MaterialTheme.typography.bodyMedium)
+                Text(text = "🍞 Jedzenie: ${viewModel.food}", style = MaterialTheme.typography.bodyMedium)
+            }
         }
     }
 }
