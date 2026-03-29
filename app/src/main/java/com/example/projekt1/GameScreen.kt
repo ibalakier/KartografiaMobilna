@@ -5,21 +5,28 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.RectF
 import android.widget.Toast
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -79,26 +86,19 @@ fun createCircleFeature(center: LatLng, radiusKm: Double, pointsCount: Int = 36)
     return Feature.fromGeometry(polygon)
 }
 
-// --- 2. MENEDŻER ZASOBÓW I WROGÓW (Z NOWĄ LOGIKĄ FRONTU) ---
+// --- 2. MENEDŻER ZASOBÓW I WROGÓW ---
 class MapEntityManager(val startLocation: LatLng, val targetLocation: LatLng) {
     private val entities = mutableListOf<Feature>()
-
-    // Zmienne przechowujące obecną pozycję "frontu" (na początku to nasza baza)
     var currentFrontlineLat = startLocation.latitude
     var currentFrontlineLng = startLocation.longitude
 
     init {
-        // Początkowe zasoby w bazie
         respawnResources()
-        // Początkowi wrogowie przed nami
         spawnEnemiesOnFrontline()
     }
 
     fun respawnResources() {
-        // Surowce pojawiają się bezpiecznie między naszą bazą a frontem (lub tuż wokół bazy)
-        // Math.random() określa, jak blisko bazy lub frontu się pojawią
         val randomFactor = Math.random()
-
         val randomLatGold = startLocation.latitude + (currentFrontlineLat - startLocation.latitude) * randomFactor + (Math.random() * 1.0 - 0.5)
         val randomLngGold = startLocation.longitude + (currentFrontlineLng - startLocation.longitude) * randomFactor + (Math.random() * 1.0 - 0.5)
         addEntity(randomLatGold, randomLngGold, "gold")
@@ -109,21 +109,15 @@ class MapEntityManager(val startLocation: LatLng, val targetLocation: LatLng) {
     }
 
     private fun spawnEnemiesOnFrontline() {
-        // Wrogowie pojawiają się dalej w kierunku bazy wroga
-        val latDirection = (targetLocation.latitude - currentFrontlineLat) * 0.15 // 15% dystansu do wroga
+        val latDirection = (targetLocation.latitude - currentFrontlineLat) * 0.15
         val lngDirection = (targetLocation.longitude - currentFrontlineLng) * 0.15
-
-        // Generujemy dwa czołgi lekko rozsunięte od siebie na nowej linii frontu
         addEntity(currentFrontlineLat + latDirection + (Math.random() * 1.0 - 0.5), currentFrontlineLng + lngDirection + (Math.random() * 1.0 - 0.5), "tank")
         addEntity(currentFrontlineLat + latDirection + (Math.random() * 1.0 - 0.5), currentFrontlineLng + lngDirection + (Math.random() * 1.0 - 0.5), "tank")
     }
 
     fun pushFrontline() {
-        // Przesuwamy nasz front o 10% całkowitego dystansu w stronę bazy wroga!
         currentFrontlineLat += (targetLocation.latitude - currentFrontlineLat) * 0.1
         currentFrontlineLng += (targetLocation.longitude - currentFrontlineLng) * 0.1
-
-        // Ponieważ poszliśmy naprzód, pojawiają się nowi wrogowie do pokonania
         spawnEnemiesOnFrontline()
     }
 
@@ -168,7 +162,7 @@ fun rememberMapView(): MapView {
 fun GameMap(
     modifier: Modifier = Modifier,
     initialLocation: LatLng,
-    opponentLocation: LatLng, // Nowe: przekazujemy pozycję wroga
+    opponentLocation: LatLng,
     isAttackMode: () -> Boolean,
     currentRound: Int,
     canTakeAction: () -> Boolean,
@@ -209,12 +203,10 @@ fun MapView.setUp(
 ): MapView {
     this.getMapAsync { map ->
         map.cameraPosition = CameraPosition.Builder().target(location).zoom(DEFAULT_ZOOM_LEVEL).build()
-
         map.setStyle(MAP_STYLE) { style ->
             val context = this.context
-
-            getBitmapFromVectorDrawable(context, R.drawable.ic_gold)?.let { style.addImage("icon-gold", it) }
-            getBitmapFromVectorDrawable(context, R.drawable.ic_food)?.let { style.addImage("icon-food", it) }
+            getBitmapFromVectorDrawable(context, R.drawable.gold)?.let { style.addImage("icon-gold", it) }
+            getBitmapFromVectorDrawable(context, R.drawable.food)?.let { style.addImage("icon-food", it) }
             getBitmapFromVectorDrawable(context, R.drawable.ic_tank)?.let { style.addImage("icon-tank", it) }
 
             val entitiesSource = GeoJsonSource("entities-source", entityManager.getFeatureCollection())
@@ -252,10 +244,9 @@ fun MapView.setUp(
 
                 if (features.isNotEmpty()) {
                     if (!canTakeAction()) {
-                        Toast.makeText(context, "Wykorzystałeś już akcję w tej rundzie! Kliknij 'Koniec Tury'.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Wykorzystałeś już akcję w tej rundzie!", Toast.LENGTH_SHORT).show()
                         return@addOnMapClickListener true
                     }
-
                     val clickedFeature = features.first()
                     val type = clickedFeature.getStringProperty("entity_type")
                     val id = clickedFeature.getStringProperty("id")
@@ -265,18 +256,11 @@ fun MapView.setUp(
                             val tankPoint = clickedFeature.geometry() as Point
                             val circleFeature = createCircleFeature(LatLng(tankPoint.latitude(), tankPoint.longitude()), radiusKm = 25.0)
                             style.getSourceAs<GeoJsonSource>("target-source")?.setGeoJson(circleFeature)
-
-                            // 1. Usuwamy zniszczony czołg
                             entityManager.removeEntity(id)
-                            // 2. PRZESUWAMY FRONT W STRONĘ WROGA!
                             entityManager.pushFrontline()
-
                             style.getSourceAs<GeoJsonSource>("entities-source")?.setGeoJson(entityManager.getFeatureCollection())
-
-                            // 3. Przesuwamy kamerę, żeby podążała za akcją
                             val newFrontlinePos = LatLng(entityManager.currentFrontlineLat, entityManager.currentFrontlineLng)
                             map.animateCamera(CameraUpdateFactory.newLatLng(newFrontlinePos), 1500)
-
                             onActionTaken()
                         }
                     } else {
@@ -295,19 +279,79 @@ fun MapView.setUp(
     return this
 }
 
+// --- 3.5 KOMPONENTY STATYSTYK ---
+@Composable
+fun ResourceBar(
+    value: Int,
+    maxValue: Int,
+    color: Color,
+    iconRes: Int,
+    label: String
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(horizontal = 4.dp)
+    ) {
+        Box(contentAlignment = Alignment.TopCenter) {
+            // Słupek (Pill)
+            Box(
+                modifier = Modifier
+                    .padding(top = 30.dp)
+                    .width(60.dp)
+                    .height(160.dp)
+                    .background(Color.White, RoundedCornerShape(30.dp))
+                    .border(3.dp, Color(0xFF3E2723), RoundedCornerShape(30.dp))
+                    .clip(RoundedCornerShape(30.dp))
+            ) {
+                // Wypełnienie od góry
+                val fillRatio = (value.toFloat() / maxValue).coerceIn(0f, 1f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(fillRatio)
+                        .background(color)
+                )
+
+                // Tekst
+                Text(
+                    text = if (label.isEmpty()) "$value" else "$value\n$label",
+                    modifier = Modifier.align(Alignment.Center).padding(top = 20.dp),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.Black,
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            // Ikona okrągła na górze
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .background(Color(0xFFFFF9C4), CircleShape)
+                    .border(3.dp, Color(0xFF3E2723), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    painter = painterResource(id = iconRes),
+                    contentDescription = null,
+                    modifier = Modifier.size(35.dp)
+                )
+            }
+        }
+    }
+}
+
 // --- 4. GŁÓWNY WIDOK EKRANU GRY ---
 @Composable
 fun GameScreen(factionName: String, viewModel: GameViewModel) {
     val context = LocalContext.current
 
-    // Ustalamy pozycje bazy naszej i bazy wroga
     val startLocation = if (factionName == "POLANDIA") LatLng(52.2297, 21.0122) else LatLng(0.0236, 37.9062)
     val opponentLocation = if (factionName == "POLANDIA") LatLng(0.0236, 37.9062) else LatLng(52.2297, 21.0122)
     val opponentName = if (factionName == "POLANDIA") "AFRYKANIA" else "POLANDIA"
 
     var isAttackMode by remember { mutableStateOf(false) }
     var actionTakenThisRound by remember { mutableStateOf(false) }
-
     var showOpponentTurnDialog by remember { mutableStateOf(false) }
     var didOpponentAttack by remember { mutableStateOf(false) }
 
@@ -315,7 +359,7 @@ fun GameScreen(factionName: String, viewModel: GameViewModel) {
         GameMap(
             modifier = Modifier.fillMaxSize(),
             initialLocation = startLocation,
-            opponentLocation = opponentLocation, // Przekazujemy cel misji do mapy
+            opponentLocation = opponentLocation,
             isAttackMode = { isAttackMode },
             currentRound = viewModel.roundNumber,
             canTakeAction = { !actionTakenThisRound },
@@ -327,7 +371,7 @@ fun GameScreen(factionName: String, viewModel: GameViewModel) {
         )
 
         Text(
-            text = "Wybrana frakcja: $factionName",
+            text = "Frakcja: $factionName",
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
@@ -337,21 +381,42 @@ fun GameScreen(factionName: String, viewModel: GameViewModel) {
             color = Color.Black
         )
 
-        Card(
+        // Panel statystyk w formie pasków
+        Row(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
-                .padding(start = 16.dp, top = 48.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+                .padding(start = 16.dp, top = 40.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Runda: ${viewModel.roundNumber}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                HorizontalDivider(modifier = Modifier.width(100.dp))
-                Text(text = "💰 Złoto: ${viewModel.gold}", style = MaterialTheme.typography.bodyMedium)
-                Text(text = "🍞 Jedzenie: ${viewModel.food}", style = MaterialTheme.typography.bodyMedium)
-                if (actionTakenThisRound) {
-                    Text(text = "Akcja zużyta!", color = Color.Red, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+            ResourceBar(
+                value = viewModel.gold,
+                maxValue = 500,
+                color = Color(0xFFFFD54F),
+                iconRes = R.drawable.gold,
+                label = ""
+            )
+            ResourceBar(
+                value = viewModel.food,
+                maxValue = 250,
+                color = Color(0xFFF4A460),
+                iconRes = R.drawable.food,
+                label = "jdn."
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Informacja o rundzie
+            Card(
+                modifier = Modifier.padding(top = 30.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Text("Runda: ${viewModel.roundNumber}", fontWeight = FontWeight.Bold)
+                    if (actionTakenThisRound) {
+                        Text("Akcja zużyta!", color = Color.Red, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         }
