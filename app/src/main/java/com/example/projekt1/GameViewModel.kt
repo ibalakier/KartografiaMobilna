@@ -24,7 +24,15 @@ class GameViewModel : ViewModel() {
     // Przykładowa funkcja aktualizująca (możesz ją podpiąć pod przycisk "Koniec tury")
     fun nextRound() {
         roundNumber++
-        gold += 20
+        gold += 10
         food -= 5
+    }
+
+    fun addGold(amount: Int) {
+        gold += amount
+    }
+
+    fun addFood(amount: Int) {
+        food += amount
     }
 }
