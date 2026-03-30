@@ -177,6 +177,7 @@ fun GameMap(
     onActionTaken: () -> Unit,
     onResourceCollected: (String) -> Unit
 ) {
+
     val context = LocalContext.current
     remember { MapLibre.getInstance(context) }
     val mapView = rememberMapView()
