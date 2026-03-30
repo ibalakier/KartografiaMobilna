@@ -211,6 +211,7 @@ fun GameMap(
     )
 }
 
+
 fun MapView.setUp(
     location: LatLng,
     isAttackMode: () -> Boolean,
