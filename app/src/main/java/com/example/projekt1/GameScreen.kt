@@ -5,18 +5,29 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.RectF
 import android.widget.Toast
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -92,7 +103,7 @@ fun createCircleFeature(center: LatLng, radiusKm: Double, pointsCount: Int = 36)
     return Feature.fromGeometry(polygon)
 }
 
-// --- 3. MENEDŻER ZASOBÓW I WROGÓW ---
+// --- 2. MENEDŻER ZASOBÓW I WROGÓW ---
 class MapEntityManager(val startLocation: LatLng, val targetLocation: LatLng) {
     private val entities = mutableListOf<Feature>()
     var currentFrontlineLat = startLocation.latitude
@@ -121,10 +132,9 @@ class MapEntityManager(val startLocation: LatLng, val targetLocation: LatLng) {
         addEntity(currentFrontlineLat + latDirection + (Math.random() * 1.0 - 0.5), currentFrontlineLng + lngDirection + (Math.random() * 1.0 - 0.5), "tank")
     }
 
-    fun pushFrontline(multiplier: Double = 1.0) {
-        // Front przesuwa się bazowo o 10%, pomnożone przez bonus jednostki
-        currentFrontlineLat += (targetLocation.latitude - currentFrontlineLat) * 0.1 * multiplier
-        currentFrontlineLng += (targetLocation.longitude - currentFrontlineLng) * 0.1 * multiplier
+    fun pushFrontline() {
+        currentFrontlineLat += (targetLocation.latitude - currentFrontlineLat) * 0.1
+        currentFrontlineLng += (targetLocation.longitude - currentFrontlineLng) * 0.1
         spawnEnemiesOnFrontline()
     }
 
@@ -213,8 +223,8 @@ fun MapView.setUp(
         map.cameraPosition = CameraPosition.Builder().target(location).zoom(DEFAULT_ZOOM_LEVEL).build()
         map.setStyle(MAP_STYLE) { style ->
             val context = this.context
-            getBitmapFromVectorDrawable(context, R.drawable.ic_gold)?.let { style.addImage("icon-gold", it) }
-            getBitmapFromVectorDrawable(context, R.drawable.ic_food)?.let { style.addImage("icon-food", it) }
+            getBitmapFromVectorDrawable(context, R.drawable.gold)?.let { style.addImage("icon-gold", it) }
+            getBitmapFromVectorDrawable(context, R.drawable.food)?.let { style.addImage("icon-food", it) }
             getBitmapFromVectorDrawable(context, R.drawable.ic_tank)?.let { style.addImage("icon-tank", it) }
 
             val entitiesSource = GeoJsonSource("entities-source", entityManager.getFeatureCollection())
@@ -236,24 +246,23 @@ fun MapView.setUp(
 
                 if (features.isNotEmpty()) {
                     if (!canTakeAction()) {
-                        Toast.makeText(context, "Wykorzystałeś już akcję!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Wykorzystałeś już akcję w tej rundzie!", Toast.LENGTH_SHORT).show()
                         return@addOnMapClickListener true
                     }
-
                     val clickedFeature = features.first()
                     val type = clickedFeature.getStringProperty("entity_type")
                     val id = clickedFeature.getStringProperty("id")
 
                     if (isAttackMode()) {
                         if (type == "tank") {
-                            if (selectedArmy == null) {
-                                Toast.makeText(context, "Wybierz armię z panelu po lewej!", Toast.LENGTH_SHORT).show()
-                                return@addOnMapClickListener true
-                            }
+                            val tankPoint = clickedFeature.geometry() as Point
+                            val circleFeature = createCircleFeature(LatLng(tankPoint.latitude(), tankPoint.longitude()), radiusKm = 25.0)
+                            style.getSourceAs<GeoJsonSource>("target-source")?.setGeoJson(circleFeature)
                             entityManager.removeEntity(id)
-                            entityManager.pushFrontline(selectedArmy.attackBonus)
+                            entityManager.pushFrontline()
                             style.getSourceAs<GeoJsonSource>("entities-source")?.setGeoJson(entityManager.getFeatureCollection())
-                            map.animateCamera(CameraUpdateFactory.newLatLng(LatLng(entityManager.currentFrontlineLat, entityManager.currentFrontlineLng)), 1500)
+                            val newFrontlinePos = LatLng(entityManager.currentFrontlineLat, entityManager.currentFrontlineLng)
+                            map.animateCamera(CameraUpdateFactory.newLatLng(newFrontlinePos), 1500)
                             onActionTaken()
                         }
                     } else {
@@ -272,7 +281,69 @@ fun MapView.setUp(
     return this
 }
 
-// --- 5. GŁÓWNY WIDOK EKRANU GRY ---
+// --- 3.5 KOMPONENTY STATYSTYK ---
+@Composable
+fun ResourceBar(
+    value: Int,
+    maxValue: Int,
+    color: Color,
+    iconRes: Int,
+    label: String
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(horizontal = 4.dp)
+    ) {
+        Box(contentAlignment = Alignment.TopCenter) {
+            // Słupek (Pill)
+            Box(
+                modifier = Modifier
+                    .padding(top = 30.dp)
+                    .width(60.dp)
+                    .height(160.dp)
+                    .background(Color.White, RoundedCornerShape(30.dp))
+                    .border(3.dp, Color(0xFF3E2723), RoundedCornerShape(30.dp))
+                    .clip(RoundedCornerShape(30.dp))
+            ) {
+                // Wypełnienie od góry
+                val fillRatio = (value.toFloat() / maxValue).coerceIn(0f, 1f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(fillRatio)
+                        .background(color)
+                )
+
+                // Tekst
+                Text(
+                    text = if (label.isEmpty()) "$value" else "$value\n$label",
+                    modifier = Modifier.align(Alignment.Center).padding(top = 20.dp),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.Black,
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            // Ikona okrągła na górze
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .background(Color(0xFFFFF9C4), CircleShape)
+                    .border(3.dp, Color(0xFF3E2723), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    painter = painterResource(id = iconRes),
+                    contentDescription = null,
+                    modifier = Modifier.size(35.dp)
+                )
+            }
+        }
+    }
+}
+
+// --- 4. GŁÓWNY WIDOK EKRANU GRY ---
 @Composable
 fun GameScreen(factionName: String, viewModel: GameViewModel) {
     val context = LocalContext.current
@@ -285,73 +356,71 @@ fun GameScreen(factionName: String, viewModel: GameViewModel) {
 
     var isAttackMode by remember { mutableStateOf(false) }
     var actionTakenThisRound by remember { mutableStateOf(false) }
-    var selectedArmyId by remember { mutableStateOf<String?>(null) }
-
-    val currentSelectedArmy = availableArmies.find { it.id == selectedArmyId }
-
     var showOpponentTurnDialog by remember { mutableStateOf(false) }
     var didOpponentAttack by remember { mutableStateOf(false) }
 
-    Row(modifier = Modifier.fillMaxSize()) {
-        if (isLandscape) {
-            Column(
-                modifier = Modifier
-                    .width(145.dp)
-                    .fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f))
-                    .padding(8.dp)
-                    .statusBarsPadding(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text("Armia", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                availableArmies.forEach { unit ->
-                    ArmyItem(
-                        unit = unit,
-                        isSelected = selectedArmyId == unit.id,
-                        onClick = { selectedArmyId = unit.id }
-                    )
-                }
+    Box(modifier = Modifier.fillMaxSize()) {
+        GameMap(
+            modifier = Modifier.fillMaxSize(),
+            initialLocation = startLocation,
+            opponentLocation = opponentLocation,
+            isAttackMode = { isAttackMode },
+            currentRound = viewModel.roundNumber,
+            canTakeAction = { !actionTakenThisRound },
+            onActionTaken = { actionTakenThisRound = true },
+            onResourceCollected = { type ->
+                if (type == "gold") viewModel.addGold(50)
+                if (type == "food") viewModel.addFood(50)
             }
         }
 
-        // KONTENER MAPY I UI
-        Box(modifier = Modifier.weight(1f).fillMaxSize()) {
-            GameMap(
-                modifier = Modifier.fillMaxSize(),
-                initialLocation = startLocation,
-                opponentLocation = opponentLocation,
-                isAttackMode = { isAttackMode },
-                currentRound = viewModel.roundNumber,
-                selectedArmy = currentSelectedArmy,
-                canTakeAction = { !actionTakenThisRound },
-                onActionTaken = { actionTakenThisRound = true },
-                onResourceCollected = { type ->
-                    if (type == "gold") viewModel.addGold(50)
-                    if (type == "food") viewModel.addFood(50)
-                }
+        Text(
+            text = "Frakcja: $factionName",
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 8.dp),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = Color.Black
+        )
+
+        // Panel statystyk w formie pasków
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(start = 16.dp, top = 40.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            ResourceBar(
+                value = viewModel.gold,
+                maxValue = 500,
+                color = Color(0xFFFFD54F),
+                iconRes = R.drawable.gold,
+                label = ""
+            )
+            ResourceBar(
+                value = viewModel.food,
+                maxValue = 250,
+                color = Color(0xFFF4A460),
+                iconRes = R.drawable.food,
+                label = "jdn."
             )
 
-            // UI NAKŁADKA
-            Text(
-                text = "Wybrana frakcja: $factionName",
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = Color.Black
-            )
+            Spacer(modifier = Modifier.width(8.dp))
 
+            // Informacja o rundzie
             Card(
-                modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 16.dp, top = 48.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)),
-                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+                modifier = Modifier.padding(top = 30.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
             ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(modifier = Modifier.padding(8.dp)) {
                     Text("Runda: ${viewModel.roundNumber}", fontWeight = FontWeight.Bold)
-                    HorizontalDivider(modifier = Modifier.width(100.dp))
-                    Text(text = "💰 Złoto: ${viewModel.gold}")
-                    Text(text = "🍞 Jedzenie: ${viewModel.food}")
-                    if (actionTakenThisRound) Text(text = "Akcja zużyta!", color = Color.Red, style = MaterialTheme.typography.bodySmall)
+                    if (actionTakenThisRound) {
+                        Text("Akcja zużyta!", color = Color.Red, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
 
