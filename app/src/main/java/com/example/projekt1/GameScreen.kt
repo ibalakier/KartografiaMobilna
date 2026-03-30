@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -39,6 +40,7 @@ import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapView
 import android.graphics.Color as AndroidColor
+import android.content.res.Configuration
 import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.PropertyFactory
@@ -56,7 +58,22 @@ import kotlin.math.PI
 private const val MAP_STYLE = "https://demotiles.maplibre.org/style.json"
 private const val DEFAULT_ZOOM_LEVEL = 4.5
 
-// --- 1. NARZĘDZIA POMOCNICZE ---
+// --- 1. MODELE DANYCH I STAŁE ---
+data class ArmyUnit(
+    val id: String,
+    val name: String,
+    val iconRes: Int,
+    val attackBonus: Double // Mnożnik przesunięcia frontu
+)
+
+val availableArmies = listOf(
+    ArmyUnit("1", "Piechota", R.drawable.ic_tank, 1.0),
+    ArmyUnit("2", "Czołg", R.drawable.ic_tank, 1.5),
+    ArmyUnit("3", "Myśliwiec", R.drawable.ic_tank, 0.8),
+    ArmyUnit("4", "Dron", R.drawable.ic_tank, 2.0)
+)
+
+// --- 2. NARZĘDZIA POMOCNICZE ---
 fun getBitmapFromVectorDrawable(context: Context, drawableId: Int): Bitmap? {
     val drawable = ContextCompat.getDrawable(context, drawableId) ?: return null
     val bitmap = Bitmap.createBitmap(
@@ -136,7 +153,7 @@ class MapEntityManager(val startLocation: LatLng, val targetLocation: LatLng) {
     fun getFeatureCollection(): FeatureCollection = FeatureCollection.fromFeatures(entities)
 }
 
-// --- 3. KOMPONENTY MAPY ---
+// --- 4. KOMPONENTY MAPY ---
 @Composable
 fun rememberMapView(): MapView {
     val context = LocalContext.current
@@ -165,13 +182,13 @@ fun GameMap(
     opponentLocation: LatLng,
     isAttackMode: () -> Boolean,
     currentRound: Int,
+    selectedArmy: ArmyUnit?,
     canTakeAction: () -> Boolean,
     onActionTaken: () -> Unit,
     onResourceCollected: (String) -> Unit
 ) {
     val context = LocalContext.current
     remember { MapLibre.getInstance(context) }
-
     val mapView = rememberMapView()
     val entityManager = remember { MapEntityManager(initialLocation, opponentLocation) }
 
@@ -187,7 +204,7 @@ fun GameMap(
 
     AndroidView(
         factory = {
-            mapView.setUp(initialLocation, isAttackMode, entityManager, canTakeAction, onActionTaken, onResourceCollected)
+            mapView.setUp(initialLocation, isAttackMode, entityManager, selectedArmy, canTakeAction, onActionTaken, onResourceCollected)
         },
         modifier = modifier
     )
@@ -197,6 +214,7 @@ fun MapView.setUp(
     location: LatLng,
     isAttackMode: () -> Boolean,
     entityManager: MapEntityManager,
+    selectedArmy: ArmyUnit?,
     canTakeAction: () -> Boolean,
     onActionTaken: () -> Unit,
     onResourceCollected: (String) -> Unit
@@ -212,35 +230,19 @@ fun MapView.setUp(
             val entitiesSource = GeoJsonSource("entities-source", entityManager.getFeatureCollection())
             style.addSource(entitiesSource)
 
-            val goldLayer = SymbolLayer("layer-gold", "entities-source")
-                .withProperties(PropertyFactory.iconImage("icon-gold"), PropertyFactory.iconSize(1.5f))
-                .withFilter(Expression.eq(Expression.get("entity_type"), "gold"))
-            style.addLayer(goldLayer)
-
-            val foodLayer = SymbolLayer("layer-food", "entities-source")
-                .withProperties(PropertyFactory.iconImage("icon-food"), PropertyFactory.iconSize(1.5f))
-                .withFilter(Expression.eq(Expression.get("entity_type"), "food"))
-            style.addLayer(foodLayer)
-
-            val tankLayer = SymbolLayer("layer-tank", "entities-source")
-                .withProperties(PropertyFactory.iconImage("icon-tank"), PropertyFactory.iconSize(1.5f))
-                .withFilter(Expression.eq(Expression.get("entity_type"), "tank"))
-            style.addLayer(tankLayer)
+            style.addLayer(SymbolLayer("layer-gold", "entities-source").withProperties(PropertyFactory.iconImage("icon-gold"), PropertyFactory.iconSize(1.5f)).withFilter(Expression.eq(Expression.get("entity_type"), "gold")))
+            style.addLayer(SymbolLayer("layer-food", "entities-source").withProperties(PropertyFactory.iconImage("icon-food"), PropertyFactory.iconSize(1.5f)).withFilter(Expression.eq(Expression.get("entity_type"), "food")))
+            style.addLayer(SymbolLayer("layer-tank", "entities-source").withProperties(PropertyFactory.iconImage("icon-tank"), PropertyFactory.iconSize(1.5f)).withFilter(Expression.eq(Expression.get("entity_type"), "tank")))
 
             val targetSource = GeoJsonSource("target-source")
             style.addSource(targetSource)
-
-            val fillLayer = FillLayer("target-layer", "target-source")
-            fillLayer.setProperties(
-                PropertyFactory.fillColor(AndroidColor.parseColor("#80FF0000")),
-                PropertyFactory.fillOutlineColor(AndroidColor.parseColor("#FF0000"))
-            )
-            style.addLayerBelow(fillLayer, "layer-tank")
+            style.addLayerBelow(FillLayer("target-layer", "target-source").apply {
+                setProperties(PropertyFactory.fillColor(AndroidColor.parseColor("#80FF0000")), PropertyFactory.fillOutlineColor(AndroidColor.parseColor("#FF0000")))
+            }, "layer-tank")
 
             map.addOnMapClickListener { latLng ->
                 val pointF = map.projection.toScreenLocation(latLng)
-                val hitBox = RectF(pointF.x - 30f, pointF.y - 30f, pointF.x + 30f, pointF.y + 30f)
-                val features = map.queryRenderedFeatures(hitBox, "layer-gold", "layer-food", "layer-tank")
+                val features = map.queryRenderedFeatures(RectF(pointF.x - 30f, pointF.y - 30f, pointF.x + 30f, pointF.y + 30f), "layer-gold", "layer-food", "layer-tank")
 
                 if (features.isNotEmpty()) {
                     if (!canTakeAction()) {
@@ -345,6 +347,8 @@ fun ResourceBar(
 @Composable
 fun GameScreen(factionName: String, viewModel: GameViewModel) {
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     val startLocation = if (factionName == "POLANDIA") LatLng(52.2297, 21.0122) else LatLng(0.0236, 37.9062)
     val opponentLocation = if (factionName == "POLANDIA") LatLng(0.0236, 37.9062) else LatLng(52.2297, 21.0122)
@@ -368,7 +372,7 @@ fun GameScreen(factionName: String, viewModel: GameViewModel) {
                 if (type == "gold") viewModel.addGold(50)
                 if (type == "food") viewModel.addFood(50)
             }
-        )
+        }
 
         Text(
             text = "Frakcja: $factionName",
@@ -419,80 +423,81 @@ fun GameScreen(factionName: String, viewModel: GameViewModel) {
                     }
                 }
             }
-        }
 
-        Button(
-            onClick = { isAttackMode = !isAttackMode },
-            colors = ButtonDefaults.buttonColors(containerColor = if (isAttackMode) Color.Red else Color.DarkGray),
-            modifier = Modifier.align(Alignment.CenterStart).padding(start = 16.dp)
-        ) {
-            Text(text = if (isAttackMode) "⚔️ ATAK" else "🖐 ZBIERZ", color = Color.White, fontWeight = FontWeight.Bold)
-        }
+            Button(
+                onClick = { isAttackMode = !isAttackMode },
+                colors = ButtonDefaults.buttonColors(containerColor = if (isAttackMode) Color.Red else Color.DarkGray),
+                modifier = Modifier.align(Alignment.CenterStart).padding(start = if(isLandscape) 8.dp else 16.dp)
+            ) {
+                Text(text = if (isAttackMode) "⚔️ ATAK" else "🖐 ZBIERZ", color = Color.White)
+            }
 
-        Button(
-            onClick = {
-                viewModel.nextRound()
-                actionTakenThisRound = false
-                didOpponentAttack = Math.random() < 0.4
-                showOpponentTurnDialog = true
+            Button(
+                onClick = {
+                    viewModel.nextRound()
+                    actionTakenThisRound = false
+                    didOpponentAttack = Math.random() < 0.4
+                    showOpponentTurnDialog = true
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).navigationBarsPadding()
+            ) {
+                Text("Koniec Tury ➔")
+            }
+        }
+    }
+
+    if (showOpponentTurnDialog) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text(if (didOpponentAttack) "⚠️ ATAK WROGA!" else "Raport wywiadu") },
+            text = { Text(if (didOpponentAttack) "$opponentName zaatakowała cię! Bronisz?" else "$opponentName nie atakuje.") },
+            confirmButton = {
+                Button(onClick = {
+                    if (didOpponentAttack) { viewModel.addGold(-20); viewModel.addFood(-10) }
+                    showOpponentTurnDialog = false
+                }) { Text(if (didOpponentAttack) "Broń (-20💰, -10🍞)" else "OK") }
             },
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
-            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).navigationBarsPadding()
-        ) {
-            Text("Koniec Tury ➔", color = Color.White, fontWeight = FontWeight.Bold)
-        }
-
-        if (showOpponentTurnDialog) {
-            AlertDialog(
-                onDismissRequest = { },
-                title = {
-                    Text(
-                        text = if (didOpponentAttack) "⚠️ ATAK WROGA!" else "Raport wywiadu",
-                        fontWeight = FontWeight.Bold,
-                        color = if (didOpponentAttack) Color.Red else Color.Black
-                    )
-                },
-                text = {
-                    Text(
-                        text = if (didOpponentAttack) {
-                            "$opponentName zaatakowała cię! Bronisz ten obszar, czy go poddajesz?"
-                        } else {
-                            "$opponentName nie atakuje cię w tej rundzie. Sytuacja na froncie jest stabilna."
-                        }
-                    )
-                },
-                confirmButton = {
-                    if (didOpponentAttack) {
-                        Button(
-                            onClick = {
-                                viewModel.addGold(-20)
-                                viewModel.addFood(-10)
-                                Toast.makeText(context, "Obroniono obszar!", Toast.LENGTH_SHORT).show()
-                                showOpponentTurnDialog = false
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
-                        ) {
-                            Text("Broń (-20💰, -10🍞)")
-                        }
-                    } else {
-                        Button(onClick = { showOpponentTurnDialog = false }) {
-                            Text("OK")
-                        }
-                    }
-                },
-                dismissButton = {
-                    if (didOpponentAttack) {
-                        Button(
-                            onClick = {
-                                Toast.makeText(context, "Terytorium stracone...", Toast.LENGTH_SHORT).show()
-                                showOpponentTurnDialog = false
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-                        ) {
-                            Text("Poddaj")
-                        }
-                    }
+            dismissButton = {
+                if (didOpponentAttack) {
+                    Button(onClick = { showOpponentTurnDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Text("Poddaj") }
                 }
+            }
+        )
+    }
+}
+
+@Composable
+fun ArmyItem(unit: ArmyUnit, isSelected: Boolean, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) Color(0xFF6C4600) else Color(0xFF8D6111)
+        ),
+        shape = CircleShape,
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isSelected) 8.dp else 2.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(Color.White, CircleShape)
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Text(
+                text = unit.name,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Bold,
+                color = Color.Black,
+                maxLines = 1
             )
         }
     }
