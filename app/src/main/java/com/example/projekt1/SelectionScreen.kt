@@ -2,15 +2,22 @@ package com.example.projekt1
 
 import android.content.res.Configuration
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun SelectionScreen(
@@ -20,51 +27,129 @@ fun SelectionScreen(
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF2B2B2B), // Ciemno-szary na górze
+                        Color(0xFF0A0A0A)  // Prawie czarny na dole
+                    )
+                )
+            )
             .statusBarsPadding()
-            .padding(top = 16.dp, start = 16.dp, end = 16.dp, bottom = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .navigationBarsPadding(),
+        contentAlignment = Alignment.Center
     ) {
-        Text(text = "Wybierz frakcję", modifier = Modifier.padding(bottom = 16.dp))
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = "WYBIERZ STRONĘ KONFLIKTU",
+                color = Color.White,
+                fontSize = if (isLandscape) 22.sp else 24.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 2.sp,
+                modifier = Modifier.padding(bottom = 2.dp)
+            )
+            Text(
+                text = "Przyszłość leży w Twoich rękach",
+                color = Color.White,
+                fontSize = 15.sp,
+                modifier = Modifier.padding(bottom = if (isLandscape) 2.dp else 4.dp)
+            )
 
-        if (isLandscape) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                FactionContent(viewModel, onNavigate, Modifier.weight(1f), true)
-            }
-        } else {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                FactionContent(viewModel, onNavigate, Modifier.fillMaxWidth(), false)
+            // --- IKONY FRAKCJI ---
+            if (isLandscape) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FactionCard(
+                        name = "ROlandia",
+                        imageRes = R.drawable.rolandia,
+                        themeColor = Color(0xFFD32F2F), // Kolor podpisu
+                        onClick = { viewModel.onFrakcjaSelected(Frakcja.ROlandia, onNavigate) }
+                    )
+
+                    Spacer(modifier = Modifier.width(48.dp))
+
+                    Text(text = "VS", color = Color.DarkGray, fontSize = 24.sp, fontWeight = FontWeight.Black)
+
+                    Spacer(modifier = Modifier.width(48.dp))
+
+                    FactionCard(
+                        name = "ROgród",
+                        imageRes = R.drawable.rogrod,
+                        themeColor = Color(0xFFFFC107), // Kolor podpisu
+                        onClick = { viewModel.onFrakcjaSelected(Frakcja.ROgród, onNavigate) }
+                    )
+                }
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(24.dp)
+                ) {
+                    FactionCard(
+                        name = "ROlandia",
+                        imageRes = R.drawable.rolandia,
+                        themeColor = Color(0xFFD32F2F),
+                        onClick = { viewModel.onFrakcjaSelected(Frakcja.ROlandia, onNavigate) }
+                    )
+
+                    Text(text = "VS", color = Color.DarkGray, fontSize = 20.sp, fontWeight = FontWeight.Black)
+
+                    FactionCard(
+                        name = "ROgród",
+                        imageRes = R.drawable.rogrod,
+                        themeColor = Color(0xFFFFC107),
+                        onClick = { viewModel.onFrakcjaSelected(Frakcja.ROgród, onNavigate) }
+                    )
+                }
             }
         }
     }
 }
 
+
 @Composable
-fun FactionContent(
-    viewModel: GameViewModel,
-    onNavigate: (String) -> Unit,
-    modifier: Modifier,
-    isLandscape: Boolean
+fun FactionCard(
+    name: String,
+    imageRes: Int,
+    themeColor: Color,
+    onClick: () -> Unit
 ) {
-    Image(
-        painter = painterResource(R.drawable.polandia),
-        contentDescription = "Polandia",
-        modifier = modifier.clickable { viewModel.onFrakcjaSelected(Frakcja.POLANDIA, onNavigate) }
-    )
+    Column(
+        modifier = Modifier
+            .width(260.dp) // Szerokość klikalnego obszaru i obrazka
+            .clickable { onClick() },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Sama grafika bez ramek i teł
+        Image(
+            painter = painterResource(id = imageRes),
+            contentDescription = name,
+            contentScale = ContentScale.Fit, // Dopasowuje obrazek tak, by był widoczny w całości
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f) // Utrzymuje kwadratowe proporcje obszaru
+        )
 
-    Spacer(if (isLandscape) Modifier.width(16.dp) else Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(1.dp))
 
-    Image(
-        painter = painterResource(R.drawable.afrykania),
-        contentDescription = "Afrykania",
-        modifier = modifier.clickable { viewModel.onFrakcjaSelected(Frakcja.AFRYKANIA, onNavigate) }
-    )
+        // Podpis koloru frakcji
+        Text(
+            text = name.uppercase(),
+            color = themeColor,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 3.sp,
+            fontSize = 24.sp,
+            textAlign = TextAlign.Center
+        )
+    }
 }
