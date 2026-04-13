@@ -2,12 +2,12 @@ package com.example.projekt1.domain.useCase
 
 import com.example.projekt1.domain.model.GameData
 import com.example.projekt1.domain.repository.GameRepository
-import kotlinx.coroutines.flow.Flow
 
-class ObserveGameDataUseCase(
+class FetchGameDataUseCase(
     private val repository: GameRepository
 ) {
-    operator fun invoke(): Flow<GameData?> {
+
+    suspend operator fun invoke(): GameData? {
         return repository.observeGameData()
     }
 }
