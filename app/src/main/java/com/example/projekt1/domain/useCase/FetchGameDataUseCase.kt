@@ -8,6 +8,6 @@ class FetchGameDataUseCase(
 ) {
 
     suspend operator fun invoke(): GameData? {
-        return repository.observeGameData()
+        return repository.fetchGameData()
     }
 }

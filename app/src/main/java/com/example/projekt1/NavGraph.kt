@@ -1,10 +1,14 @@
 package com.example.projekt1
 
+import android.app.Activity
 import android.widget.Toast
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
@@ -16,8 +20,20 @@ import com.example.projekt1.domain.model.RoomState
 fun NavGraph(viewModel: GameViewModel) {
     val initialGameData by viewModel.initialGameData.collectAsState()
 
+    if (initialGameData == null) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+
     if (initialGameData?.roomState == RoomState.FULL) {
-        Toast.makeText(LocalContext.current, "Poczekaj na wolny pokój.", Toast.LENGTH_LONG).show()
+        val context = LocalContext.current
+        Toast.makeText(context, "Poczekaj na wolny pokój.", Toast.LENGTH_LONG).show()
+        (context as? Activity)?.finish()
         return
     }
 

@@ -26,7 +26,7 @@ class GameRepositoryImpl(
             .collection(COLLECTION_PATH)
             .document(DOCUMENT_PATH)
 
-    override suspend fun observeGameData(): GameData? {
+    override suspend fun fetchGameData(): GameData? {
         val snapshot = docRef.get(Source.SERVER).await()
 
         val data = snapshot.data ?: return null
@@ -47,10 +47,10 @@ class GameRepositoryImpl(
         }
 
         return GameData(
-            activeRound = data[FIELD_NAME_ACTIVE_ROUND] as? Int ?: 0,
+            activeRound = snapshot.getLong(FIELD_NAME_ACTIVE_ROUND)?.toInt() ?: 0,
             playerNumber = if (player1Faction == null) 1 else 2,
             roomState = roomState,
-            faction = faction,
+            faction = faction
         )
     }
 
