@@ -39,6 +39,11 @@ android {
     buildFeatures {
         compose = true
     }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
 }
 
 dependencies {
@@ -62,5 +67,5 @@ dependencies {
     // Import the Firebase BoM
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.firestore)
-    implementation("org.maplibre.gl:android-sdk:11.0.0")
+    implementation("org.maplibre.gl:android-sdk:11.5.0")
 }

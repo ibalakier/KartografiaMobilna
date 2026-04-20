@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Canvas
 import android.graphics.RectF
 import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
@@ -33,7 +32,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -121,7 +119,7 @@ fun createCircleFeature(center: LatLng, radiusKm: Double, pointsCount: Int = 36)
     return Feature.fromGeometry(Polygon.fromLngLats(listOf(points)))
 }
 
-// --- 3. ZOPTYMALIZOWANY MENEDŻER TERYTORIUM (CACHE) ---
+// --- 3. MENEDŻER TERYTORIUM ---
 class MapEntityManager(val baseLocation: LatLng, val combatArenaLocation: LatLng, initialRadius: Double = 0.0) {
     private val resources = mutableListOf<Feature>()
     var conqueredRadiusKm = initialRadius
@@ -260,7 +258,10 @@ fun GameMap(
                         if (isAttackMode() || !isPlayerTurn()) return@addOnMapClickListener true
 
                         val pointF = map.projection.toScreenLocation(latLng)
-                        val features = map.queryRenderedFeatures(RectF(pointF.x - 50f, pointF.y - 50f, pointF.x + 50f, pointF.y + 50f), "layer-gold", "layer-food")
+                        val features = map.queryRenderedFeatures(
+                            RectF(pointF.x - 50f, pointF.y - 50f, pointF.x + 50f, pointF.y + 50f),
+                            "layer-gold", "layer-food"
+                        )
 
                         if (features.isNotEmpty()) {
                             val clickedFeature = features.first()
@@ -268,7 +269,8 @@ fun GameMap(
                             val id = clickedFeature.getStringProperty("id")
 
                             entityManager.removeResource(id)
-                            style.getSourceAs<GeoJsonSource>("resources-source")?.setGeoJson(entityManager.getResourcesCollection())
+                            style.getSourceAs<GeoJsonSource>("resources-source")
+                                ?.setGeoJson(entityManager.getResourcesCollection())
                             onResourceCollected(type)
 
                             Toast.makeText(context, "Zebrano zasoby! Czas na ruch wroga.", Toast.LENGTH_SHORT).show()
@@ -296,17 +298,21 @@ fun GameScreen(factionName: String, viewModel: GameViewModel, onNavigateToMenu: 
     val combatArenaLocation = LatLng(2.0, 18.0)
     val opponentName = if (isPoland) "ROgród" else "ROlandia"
 
-    // Startowy rozmiar podbitego terytorium:
-    // ROlandia zaczyna z 0. ROgród zastaje już inwazję na 1000 km
-    val initialRadius = if (isPoland) 0.0 else 1000.0
-
     val factionArmies = remember { getAvailableArmies(isPoland) }
-    val entityManager = remember { MapEntityManager(baseLocation, combatArenaLocation, initialRadius) }
+
+    // entityManager inicjalizujemy z wartością z ViewModelu (już załadowaną z bazy)
+    val entityManager = remember {
+        MapEntityManager(baseLocation, combatArenaLocation, viewModel.conqueredRadiusKm)
+    }
     var mapInstance by remember { mutableStateOf<MapLibreMap?>(null) }
 
-    var isPlayerTurn by remember { mutableStateOf(true) }
+    // isPlayerTurn pochodzi z bazy przez ViewModel
+    val isPlayerTurn by remember { derivedStateOf { viewModel.isMyTurn } }
+
     var combatPhase by remember { mutableStateOf(CombatPhase.IDLE) }
-    var hasInvasionStarted by remember { mutableStateOf(!isPoland) } // Jeśli gramy ROgrodem, inwazja jest już rozpoczęta na starcie!
+
+    // Inwazja została rozpoczęta jeśli ktokolwiek już coś podbił
+    var hasInvasionStarted by remember { mutableStateOf(viewModel.conqueredRadiusKm > 0.0) }
 
     var selectedArmyId by remember { mutableStateOf<String?>(null) }
     var attackQuantity by remember { mutableIntStateOf(1) }
@@ -317,10 +323,34 @@ fun GameScreen(factionName: String, viewModel: GameViewModel, onNavigateToMenu: 
     var targetZoom by remember { mutableDoubleStateOf(BASE_ZOOM_LEVEL) }
 
     var showExplosion by remember { mutableStateOf(false) }
-    var showOpponentTurnDialog by remember { mutableStateOf(false) }
-    var didOpponentAttack by remember { mutableStateOf(false) }
     var gameOverMessage by remember { mutableStateOf<String?>(null) }
 
+    // Synchronizacja conqueredRadiusKm z bazy do entityManager i mapy
+    LaunchedEffect(viewModel.conqueredRadiusKm) {
+        val newRadius = viewModel.conqueredRadiusKm
+        entityManager.conqueredRadiusKm = newRadius
+        if (newRadius > 0.0) hasInvasionStarted = true
+        mapInstance?.style?.getSourceAs<GeoJsonSource>("conquered-source")
+            ?.setGeoJson(entityManager.getConqueredAreaFeature())
+    }
+
+    // Gdy tura wraca do nas — chowamy panel ataku i wracamy kamerą do bazy
+    LaunchedEffect(isPlayerTurn) {
+        if (isPlayerTurn) {
+            combatPhase = CombatPhase.IDLE
+            selectedArmyId = null
+            attackQuantity = 1
+            cameraTarget = baseLocation
+            targetZoom = BASE_ZOOM_LEVEL
+
+            // Co 3 rundy respawnujemy zasoby
+            if (viewModel.roundNumber % 3 == 0) {
+                entityManager.respawnResources()
+                mapInstance?.style?.getSourceAs<GeoJsonSource>("resources-source")
+                    ?.setGeoJson(entityManager.getResourcesCollection())
+            }
+        }
+    }
 
     LaunchedEffect(cameraTarget, targetZoom) {
         mapInstance?.animateCamera(CameraUpdateFactory.newLatLngZoom(cameraTarget, targetZoom), 1500)
@@ -328,49 +358,25 @@ fun GameScreen(factionName: String, viewModel: GameViewModel, onNavigateToMenu: 
 
     fun checkWinCondition(): Boolean {
         if (entityManager.conqueredRadiusKm >= 3000.0) {
-            gameOverMessage = if (isPoland) "🏆 ZWYCIĘSTWO!\nROlandia zdominowała ROgród!" else "💀 PORAŻKA!\nROlandia zdominowała Twój kontynent."
+            gameOverMessage = if (isPoland)
+                "🏆 ZWYCIĘSTWO!\nROlandia zdominowała ROgród!"
+            else
+                "💀 PORAŻKA!\nROlandia zdominowała Twój kontynent."
             return true
         } else if (hasInvasionStarted && entityManager.conqueredRadiusKm <= 0.0) {
-            gameOverMessage = if (isPoland) "💀 PORAŻKA!\nWyrzucono Was z ROgrodu." else "🏆 ZWYCIĘSTWO!\nOdeparłeś inwazję ROlandii!"
+            gameOverMessage = if (isPoland)
+                "💀 PORAŻKA!\nWyrzucono Was z ROgrodu."
+            else
+                "🏆 ZWYCIĘSTWO!\nOdeparłeś inwazję ROlandii!"
             return true
         }
         return false
     }
 
+    // Kończy naszą turę — zapisuje do bazy, drugi gracz dostaje isMyTurn = true
     fun finishPlayerAction() {
-        isPlayerTurn = false
-        coroutineScope.launch {
-            delay(500)
-            if (checkWinCondition()) return@launch
-
-            if (isPoland) {
-                // Grasz jako ROlandia - ROgród czeka na Twój atak
-                if (hasInvasionStarted) {
-                    didOpponentAttack = Math.random() < 0.5
-                } else {
-                    didOpponentAttack = false
-                }
-            } else {
-                // Grasz jako ROgród - ROlandia naciera
-                didOpponentAttack = Math.random() < 0.7
-                if (didOpponentAttack) {
-                    hasInvasionStarted = true
-                }
-            }
-
-            showOpponentTurnDialog = true
-        }
-    }
-
-    fun advanceToNextRound() {
-        viewModel.nextRound()
-
-        if (viewModel.roundNumber % 3 == 0) {
-            entityManager.respawnResources()
-            mapInstance?.style?.getSourceAs<GeoJsonSource>("resources-source")?.setGeoJson(entityManager.getResourcesCollection())
-        }
-
-        isPlayerTurn = true
+        if (checkWinCondition()) return
+        viewModel.endTurn()
     }
 
     fun executeAttack(unit: ArmyUnit, quantity: Int) {
@@ -381,7 +387,6 @@ fun GameScreen(factionName: String, viewModel: GameViewModel, onNavigateToMenu: 
         }
 
         armyInventory = armyInventory.toMutableMap().apply { this[unit.id] = currentStock - quantity }
-        isPlayerTurn = false
 
         coroutineScope.launch {
             val totalAttackPower = unit.attackBonus * quantity
@@ -389,7 +394,10 @@ fun GameScreen(factionName: String, viewModel: GameViewModel, onNavigateToMenu: 
                 showExplosion = true
                 hasInvasionStarted = true
                 entityManager.updateConqueredTerritory(totalAttackPower, isPolandAction = isPoland)
-                mapInstance?.style?.getSourceAs<GeoJsonSource>("conquered-source")?.setGeoJson(entityManager.getConqueredAreaFeature())
+                // Zapisz nowy radius do bazy
+                viewModel.updateConqueredRadius(entityManager.conqueredRadiusKm)
+                mapInstance?.style?.getSourceAs<GeoJsonSource>("conquered-source")
+                    ?.setGeoJson(entityManager.getConqueredAreaFeature())
                 Toast.makeText(context, "Sukces! Terytorium zdobyte.", Toast.LENGTH_SHORT).show()
 
                 delay(1500)
@@ -417,14 +425,14 @@ fun GameScreen(factionName: String, viewModel: GameViewModel, onNavigateToMenu: 
             armyInventory = armyInventory.toMutableMap().apply { this[unit.id] = (this[unit.id] ?: 0) + 1 }
             Toast.makeText(context, "Kupiono: ${unit.name}", Toast.LENGTH_SHORT).show()
         } else {
-            Toast.makeText(context, "Brak surowców! Wymagane: ${unit.goldCost} Złota ${unit.foodCost} Jedzenia", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Brak surowców! Wymagane: ${unit.goldCost} Złota, ${unit.foodCost} Jedzenia", Toast.LENGTH_SHORT).show()
         }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF121212))) {
         Row(modifier = Modifier.fillMaxSize()) {
 
-            //LEWY PANEL
+            // LEWY PANEL (landscape)
             if (isLandscape) {
                 Column(
                     modifier = Modifier
@@ -436,10 +444,11 @@ fun GameScreen(factionName: String, viewModel: GameViewModel, onNavigateToMenu: 
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("Zasoby", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = Color.White)
+                    Text("Wojsko", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = Color.White)
                     factionArmies.forEach { unit ->
                         ArmyItem(
-                            unit = unit, quantity = armyInventory[unit.id] ?: 0,
+                            unit = unit,
+                            quantity = armyInventory[unit.id] ?: 0,
                             isSelected = selectedArmyId == unit.id,
                             onClick = {
                                 if (isPlayerTurn) {
@@ -454,7 +463,7 @@ fun GameScreen(factionName: String, viewModel: GameViewModel, onNavigateToMenu: 
                 }
             }
 
-            // ŚRODEK
+            // ŚRODEK — MAPA
             Box(modifier = Modifier.weight(1f).fillMaxSize()) {
                 GameMap(
                     modifier = Modifier.fillMaxSize(),
@@ -470,7 +479,7 @@ fun GameScreen(factionName: String, viewModel: GameViewModel, onNavigateToMenu: 
                     onMapReady = { mapInstance = it }
                 )
 
-                // --- PASEK FRONTU NA SAMEJ GÓRZE MAPY ---
+                // PASEK FRONTU
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
@@ -480,7 +489,7 @@ fun GameScreen(factionName: String, viewModel: GameViewModel, onNavigateToMenu: 
                     FrontlineBanner(conqueredRadius = entityManager.conqueredRadiusKm, maxRadius = 3000.0)
                 }
 
-                // NAWIGACJA: ATAK/BAZA
+                // PRZYCISK TRYBU (tylko nasza tura)
                 if (isPlayerTurn) {
                     Button(
                         onClick = {
@@ -515,22 +524,33 @@ fun GameScreen(factionName: String, viewModel: GameViewModel, onNavigateToMenu: 
                     val currentSelectedArmy = factionArmies.find { it.id == selectedArmyId }
 
                     Card(
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp).navigationBarsPadding(),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 32.dp)
+                            .navigationBarsPadding(),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF222222).copy(alpha = 0.95f)),
                         elevation = CardDefaults.cardElevation(8.dp)
                     ) {
-                        Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
                             Text(
                                 text = "Zwiad: Siła wroga to $currentEnemyDefense",
-                                fontWeight = FontWeight.Bold, color = Color(0xFFFF5252)
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFFF5252)
                             )
                             Spacer(modifier = Modifier.height(8.dp))
 
                             if (!isLandscape) {
-                                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
                                     factionArmies.forEach { unit ->
                                         ArmyItem(
-                                            unit = unit, quantity = armyInventory[unit.id] ?: 0,
+                                            unit = unit,
+                                            quantity = armyInventory[unit.id] ?: 0,
                                             isSelected = selectedArmyId == unit.id,
                                             onClick = { selectedArmyId = unit.id; attackQuantity = 1 },
                                             onBuy = { buyWeapon(unit) },
@@ -553,16 +573,27 @@ fun GameScreen(factionName: String, viewModel: GameViewModel, onNavigateToMenu: 
                                     fontWeight = FontWeight.Bold
                                 )
 
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                    Button(onClick = { if (attackQuantity > 1) attackQuantity-- }, colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)) { Text("-", color = Color.White) }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    Button(
+                                        onClick = { if (attackQuantity > 1) attackQuantity-- },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
+                                    ) { Text("-", color = Color.White) }
                                     Text("Wyślij: $attackQuantity", fontWeight = FontWeight.Bold, color = Color.White)
-                                    Button(onClick = { if (attackQuantity < available) attackQuantity++ }, colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)) { Text("+", color = Color.White) }
+                                    Button(
+                                        onClick = { if (attackQuantity < available) attackQuantity++ },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
+                                    ) { Text("+", color = Color.White) }
                                 }
 
                                 Button(
                                     onClick = { executeAttack(currentSelectedArmy, attackQuantity) },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
-                                ) { Text(if (isPoland) "Uderz!" else "Odbij!", color = Color.White) }
+                                ) {
+                                    Text(if (isPoland) "Uderz!" else "Odbij!", color = Color.White)
+                                }
                             } else {
                                 Text("Wybierz jednostkę do ataku.", color = Color.Gray)
                             }
@@ -570,27 +601,77 @@ fun GameScreen(factionName: String, viewModel: GameViewModel, onNavigateToMenu: 
                     }
                 }
 
+                // OVERLAY: TURA PRZECIWNIKA
+                if (!isPlayerTurn) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.65f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = Color(0xFFFFC107), strokeWidth = 4.dp)
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Tura $opponentName...",
+                                color = Color.White,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Poczekaj na ruch przeciwnika",
+                                color = Color.LightGray,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+
+                // EKSPLOZJA
                 if (showExplosion) {
                     Box(
                         contentAlignment = Alignment.Center,
-                        modifier = Modifier.fillMaxSize().background(Color.Red.copy(alpha = 0.4f))
-                    ) { Text(text = "💥", fontSize = 120.sp) }
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Red.copy(alpha = 0.4f))
+                    ) {
+                        Text(text = "💥", fontSize = 120.sp)
+                    }
                 }
 
-                // --- EKRAN KOŃCA GRY ---
+                // EKRAN KOŃCA GRY
                 if (gameOverMessage != null) {
                     Box(
                         contentAlignment = Alignment.Center,
-                        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.9f))
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.9f))
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(text = gameOverMessage!!, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Text(
+                                text = gameOverMessage!!,
+                                color = Color.White,
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = { viewModel.resetGame() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF424242))
+                            ) {
+                                Text("Zagraj ponownie", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
             }
 
-            //PRAWY PANEL
+            // PRAWY PANEL — zasoby (landscape)
             if (isLandscape) {
                 Column(
                     modifier = Modifier
@@ -603,96 +684,38 @@ fun GameScreen(factionName: String, viewModel: GameViewModel, onNavigateToMenu: 
                     verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
                     Text("Surowce", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = Color.White)
-
                     DynamicResourceBanner(imageRes = R.drawable.zloto, amount = viewModel.gold, maxAmount = 500, fillColor = Color(0xFFFFD54F))
                     DynamicResourceBanner(imageRes = R.drawable.jedzenie, amount = viewModel.food, maxAmount = 500, fillColor = Color(0xFFFFB74D))
                 }
             }
         }
-    }
 
-    // OKIENKO AKCJI WROGA
-    if (showOpponentTurnDialog) {
-        val canAffordDefense = viewModel.gold >= 20 && viewModel.food >= 10
-
-        AlertDialog(
-            onDismissRequest = { },
-            containerColor = Color(0xFF222222),
-            titleContentColor = Color.White,
-            textContentColor = Color.White,
-            title = { Text(if (didOpponentAttack) "ATAK WROGA!" else "Raport wywiadu") },
-            text = {
-                if (didOpponentAttack) {
-                    Column {
-                        Text("$opponentName szturmuje Twoje pozycje!")
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Koszt obrony: 20")
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Image(painter = painterResource(id = R.drawable.zloto), contentDescription = null, modifier = Modifier.size(16.dp).clip(CircleShape))
-                            Text(", 10")
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Image(painter = painterResource(id = R.drawable.jedzenie), contentDescription = null, modifier = Modifier.size(16.dp).clip(CircleShape))
-                        }
-                    }
-                } else if (!hasInvasionStarted && isPoland) {
-                    Text("$opponentName nie atakuje. Zbieraj wojsko i ruszaj na podbój!")
-                } else {
-                    Text("$opponentName aktualnie nie atakuje.")
-                }
-            },
-            confirmButton = {
-                if (didOpponentAttack) {
-                    Button(
-                        onClick = {
-                            viewModel.addGold(-20)
-                            viewModel.addFood(-10)
-                            showOpponentTurnDialog = false
-                            advanceToNextRound()
-                        },
-                        enabled = canAffordDefense,
-                        colors = ButtonDefaults.buttonColors(containerColor = if (canAffordDefense) Color(0xFF2E7D32) else Color.DarkGray)
-                    ) { Text(if (canAffordDefense) "Broń pozycji" else "Brak surowców!", color = Color.White) }
-                } else {
-                    Button(onClick = {
-                        showOpponentTurnDialog = false
-                        advanceToNextRound()
-                    }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF424242))) { Text("Twój ruch!", color = Color.White) }
-                }
-            },
-            dismissButton = {
-                if (didOpponentAttack) {
-                    Button(
-                        onClick = {
-                            showOpponentTurnDialog = false
-
-                            coroutineScope.launch {
-                                cameraTarget = combatArenaLocation
-                                targetZoom = COMBAT_ZOOM_LEVEL
-                                delay(1500)
-
-                                showExplosion = true
-                                Toast.makeText(context, "Terytorium stracone!", Toast.LENGTH_LONG).show()
-
-                                entityManager.updateConqueredTerritory(1.5, isPolandAction = !isPoland)
-                                mapInstance?.style?.getSourceAs<GeoJsonSource>("conquered-source")?.setGeoJson(entityManager.getConqueredAreaFeature())
-
-                                delay(1500)
-                                showExplosion = false
-
-                                if (checkWinCondition()) return@launch
-
-                                delay(1000)
-                                cameraTarget = baseLocation
-                                targetZoom = BASE_ZOOM_LEVEL
-
-                                advanceToNextRound()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
-                    ) { Text("Poddaj Teren", color = Color.White) }
-                }
+        // PASEK ZASOBÓW PORTRAIT (dół ekranu)
+        if (!isLandscape) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 8.dp, bottom = 8.dp)
+                    .navigationBarsPadding(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                DynamicResourceBanner(imageRes = R.drawable.zloto, amount = viewModel.gold, maxAmount = 500, fillColor = Color(0xFFFFD54F))
+                DynamicResourceBanner(imageRes = R.drawable.jedzenie, amount = viewModel.food, maxAmount = 500, fillColor = Color(0xFFFFB74D))
             }
+        }
+
+        // RUNDA — zawsze widoczna (lewy górny róg)
+        Text(
+            text = "Runda ${viewModel.roundNumber}",
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(start = 8.dp, top = 8.dp)
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp)
         )
     }
 }
@@ -790,9 +813,16 @@ fun DynamicResourceBanner(imageRes: Int, amount: Int, maxAmount: Int, fillColor:
     }
 }
 
-//KOMPONENT JEDNOSTKI
+// --- KOMPONENT JEDNOSTKI ---
 @Composable
-fun ArmyItem(unit: ArmyUnit, quantity: Int, isSelected: Boolean, onClick: () -> Unit, onBuy: () -> Unit, isPlayerTurn: Boolean) {
+fun ArmyItem(
+    unit: ArmyUnit,
+    quantity: Int,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onBuy: () -> Unit,
+    isPlayerTurn: Boolean
+) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable(enabled = isPlayerTurn) { onClick() },
         colors = CardDefaults.cardColors(containerColor = if (isSelected) Color(0xFF6C4600) else Color(0xFF333333)),
@@ -824,7 +854,6 @@ fun ArmyItem(unit: ArmyUnit, quantity: Int, isSelected: Boolean, onClick: () -> 
                 Column {
                     Text(text = unit.name, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = Color.White)
                     Text(text = "⚔️${unit.attackBonus}", fontSize = 10.sp, color = Color.LightGray)
-
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Image(
                             painter = painterResource(id = R.drawable.zloto),
@@ -833,9 +862,7 @@ fun ArmyItem(unit: ArmyUnit, quantity: Int, isSelected: Boolean, onClick: () -> 
                         )
                         Spacer(modifier = Modifier.width(2.dp))
                         Text(text = "${unit.goldCost}", fontSize = 12.sp, color = Color.LightGray)
-
                         Spacer(modifier = Modifier.width(6.dp))
-
                         Image(
                             painter = painterResource(id = R.drawable.jedzenie),
                             contentDescription = "Jedzenie",
@@ -859,4 +886,5 @@ fun ArmyItem(unit: ArmyUnit, quantity: Int, isSelected: Boolean, onClick: () -> 
             }
         }
     }
+
 }

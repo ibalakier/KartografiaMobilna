@@ -30,12 +30,12 @@ fun NavGraph(viewModel: GameViewModel) {
         return
     }
 
-    if (initialGameData?.roomState == RoomState.FULL) {
-        val context = LocalContext.current
-        Toast.makeText(context, "Poczekaj na wolny pokój.", Toast.LENGTH_LONG).show()
-        (context as? Activity)?.finish()
-        return
-    }
+//    if (initialGameData?.roomState == RoomState.FULL) {
+//        val context = LocalContext.current
+//        Toast.makeText(context, "Poczekaj na wolny pokój.", Toast.LENGTH_LONG).show()
+//        (context as? Activity)?.finish()
+//        return
+//    }
 
     val navController = rememberNavController()
 
