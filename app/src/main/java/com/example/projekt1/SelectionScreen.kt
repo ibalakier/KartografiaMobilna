@@ -70,10 +70,11 @@ fun SelectionScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     FactionCard(
-                        name = "ROlandia",
+                        faction = Faction.ROlandia,
                         imageRes = R.drawable.rolandia,
-                        themeColor = Color(0xFFD32F2F), // Kolor podpisu
-                        onClick = { viewModel.onFrakcjaSelected(Frakcja.ROlandia, onNavigate) }
+                        themeColor = Color(0xFFD32F2F),
+                        viewModel = viewModel,
+                        onNavigate = onNavigate
                     )
 
                     Spacer(modifier = Modifier.width(48.dp))
@@ -83,10 +84,11 @@ fun SelectionScreen(
                     Spacer(modifier = Modifier.width(48.dp))
 
                     FactionCard(
-                        name = "ROgród",
+                        faction = Faction.ROgród,
                         imageRes = R.drawable.rogrod,
                         themeColor = Color(0xFFFFC107), // Kolor podpisu
-                        onClick = { viewModel.onFrakcjaSelected(Frakcja.ROgród, onNavigate) }
+                        viewModel = viewModel,
+                        onNavigate = onNavigate
                     )
                 }
             } else {
@@ -96,19 +98,21 @@ fun SelectionScreen(
                     verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
                     FactionCard(
-                        name = "ROlandia",
+                        faction = Faction.ROlandia,
                         imageRes = R.drawable.rolandia,
                         themeColor = Color(0xFFD32F2F),
-                        onClick = { viewModel.onFrakcjaSelected(Frakcja.ROlandia, onNavigate) }
+                        viewModel = viewModel,
+                        onNavigate = onNavigate
                     )
 
                     Text(text = "VS", color = Color.DarkGray, fontSize = 20.sp, fontWeight = FontWeight.Black)
 
                     FactionCard(
-                        name = "ROgród",
+                        faction = Faction.ROgród,
                         imageRes = R.drawable.rogrod,
                         themeColor = Color(0xFFFFC107),
-                        onClick = { viewModel.onFrakcjaSelected(Frakcja.ROgród, onNavigate) }
+                        viewModel = viewModel,
+                        onNavigate = onNavigate
                     )
                 }
             }
@@ -119,21 +123,25 @@ fun SelectionScreen(
 
 @Composable
 fun FactionCard(
-    name: String,
+    faction: Faction,
     imageRes: Int,
     themeColor: Color,
-    onClick: () -> Unit
+    viewModel: GameViewModel,
+    onNavigate: (String) -> Unit
 ) {
     Column(
         modifier = Modifier
             .width(260.dp) // Szerokość klikalnego obszaru i obrazka
-            .clickable { onClick() },
+            .clickable {
+                viewModel.selectFaction(faction)
+                onNavigate("game_screen/${faction.name}")
+            },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Sama grafika bez ramek i teł
         Image(
             painter = painterResource(id = imageRes),
-            contentDescription = name,
+            contentDescription = faction.name,
             contentScale = ContentScale.Fit, // Dopasowuje obrazek tak, by był widoczny w całości
             modifier = Modifier
                 .fillMaxWidth()
@@ -144,7 +152,7 @@ fun FactionCard(
 
         // Podpis koloru frakcji
         Text(
-            text = name.uppercase(),
+            text = faction.name.uppercase(),
             color = themeColor,
             fontWeight = FontWeight.Black,
             letterSpacing = 3.sp,
